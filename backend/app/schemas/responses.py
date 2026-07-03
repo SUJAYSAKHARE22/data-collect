@@ -45,3 +45,10 @@ class TreeResponse(BaseModel):
 class FilesResponse(BaseModel):
     job_id: str
     files: list[dict]
+
+
+class FileContentResponse(BaseModel):
+    job_id: str
+    path: str
+    content: str
+

@@ -76,6 +76,14 @@ function App() {
   const [filesSearch, setFilesSearch] = useState('');
   const [filesSort, setFilesSort] = useState('path-asc');
 
+  // Explorer and Code Viewer states
+  const [explorerTab, setExplorerTab] = useState('tree');
+  const [selectedFilePath, setSelectedFilePath] = useState(null);
+  const [selectedFileDetails, setSelectedFileDetails] = useState(null);
+  const [selectedFileContent, setSelectedFileContent] = useState(null);
+  const [loadingFileContent, setLoadingFileContent] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   // Load history from localStorage on mount
   useEffect(() => {
     try {
@@ -159,8 +167,8 @@ function App() {
       setJobFiles(filesData.files);
 
       // Auto-expand root folder
-      if (treeData.tree) {
-        setExpandedNodes(new Set([Object.keys(treeData.tree)[0] || '/']));
+      if (treeData.tree && treeData.tree.name) {
+        setExpandedNodes(new Set([treeData.tree.name]));
       }
     } catch (err) {
       console.error(err);
@@ -308,6 +316,44 @@ function App() {
     setJobFiles([]);
     setJobStatus(null);
     setExpandedNodes(new Set());
+    setSelectedFilePath(null);
+    setSelectedFileDetails(null);
+    setSelectedFileContent(null);
+    setLoadingFileContent(false);
+    setCopied(false);
+  };
+
+  const handleFileClick = async (path) => {
+    setSelectedFilePath(path);
+    setLoadingFileContent(true);
+    setSelectedFileContent('');
+    setCopied(false);
+
+    // Find the file details from jobFiles
+    const details = jobFiles.find(f => f.path === path);
+    setSelectedFileDetails(details);
+
+    try {
+      const response = await fetch(`${API_BASE}/files/${jobId}/${path}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load file content: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setSelectedFileContent(data.content);
+    } catch (err) {
+      console.error(err);
+      setSelectedFileContent(`[Error loading file content: ${err.message}]`);
+    } finally {
+      setLoadingFileContent(false);
+    }
+  };
+
+  const handleCopyCode = () => {
+    if (selectedFileContent) {
+      navigator.clipboard.writeText(selectedFileContent);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleHistoryItemClick = (histItem) => {
@@ -373,44 +419,45 @@ function App() {
     return `${mb.toFixed(1)} MB`;
   };
 
-  // Helper: check if node is directory or file
-  const renderTree = (node, path = '') => {
-    if (!node || typeof node !== 'object') return null;
+  // Helper: recursively render the directory tree nodes
+  const renderTreeNode = (node, path = '') => {
+    if (!node) return null;
+    const currentPath = path ? `${path}/${node.name}` : node.name;
+    const isDir = node.type === 'directory';
+    const isOpen = expandedNodes.has(currentPath);
 
-    return Object.entries(node).map(([name, contents]) => {
-      const currentPath = path ? `${path}/${name}` : name;
-      const isDir = contents !== null && typeof contents === 'object';
-      const isOpen = expandedNodes.has(currentPath);
-
-      if (isDir) {
-        return (
-          <div key={currentPath} className="tree-node">
-            <div 
-              className="tree-node-content folder"
-              onClick={() => toggleNode(currentPath)}
-            >
-              {isOpen ? <FolderOpen className="tree-icon folder" /> : <Folder className="tree-icon folder" />}
-              <span>{name}</span>
-            </div>
-            {isOpen && (
-              <div className="tree-node-children">
-                {renderTree(contents, currentPath)}
-              </div>
-            )}
+    if (isDir) {
+      return (
+        <div key={currentPath} className="tree-node">
+          <div 
+            className="tree-node-content folder"
+            onClick={() => toggleNode(currentPath)}
+          >
+            {isOpen ? <FolderOpen className="tree-icon folder" /> : <Folder className="tree-icon folder" />}
+            <span>{node.name}</span>
           </div>
-        );
-      } else {
-        // File
-        return (
-          <div key={currentPath} className="tree-node">
-            <div className="tree-node-content file">
-              <FileCode className="tree-icon file" />
-              <span>{name}</span>
+          {isOpen && node.children && (
+            <div className="tree-node-children">
+              {node.children.map(child => renderTreeNode(child, currentPath))}
             </div>
+          )}
+        </div>
+      );
+    } else {
+      // File
+      return (
+        <div key={currentPath} className="tree-node">
+          <div 
+            className={`tree-node-content file clickable ${selectedFilePath === node.path ? 'selected' : ''}`}
+            onClick={() => handleFileClick(node.path)}
+            style={{ cursor: 'pointer' }}
+          >
+            <FileCode className="tree-icon file" />
+            <span>{node.name}</span>
           </div>
-        );
-      }
-    });
+        </div>
+      );
+    }
   };
 
   // Filter and sort files list
@@ -434,8 +481,8 @@ function App() {
         valA = a.path;
         valB = b.path;
       } else if (field === 'size') {
-        valA = a.size || 0;
-        valB = b.size || 0;
+        valA = a.size_bytes || 0;
+        valB = b.size_bytes || 0;
       } else if (field === 'language') {
         valA = a.language || '';
         valB = b.language || '';
@@ -793,6 +840,33 @@ function App() {
                         </div>
                       </div>
 
+                      {/* Entry Files & Dependency Files list */}
+                      {jobMetadata.entry_files && jobMetadata.entry_files.length > 0 && (
+                        <div style={{ marginTop: '1.25rem' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-dark)', display: 'block', marginBottom: '0.5rem' }}>Entry Files:</span>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {jobMetadata.entry_files.map(f => (
+                              <span key={f} className="lang-pill" style={{ background: 'rgba(6, 182, 212, 0.08)', color: 'var(--primary)', borderColor: 'rgba(6, 182, 212, 0.15)' }}>
+                                {f}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {jobMetadata.dependencies && jobMetadata.dependencies.length > 0 && (
+                        <div style={{ marginTop: '1.25rem' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-dark)', display: 'block', marginBottom: '0.5rem' }}>Dependency Files:</span>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {jobMetadata.dependencies.map(f => (
+                              <span key={f} className="lang-pill" style={{ background: 'rgba(139, 92, 246, 0.08)', color: 'var(--secondary)', borderColor: 'rgba(139, 92, 246, 0.15)' }}>
+                                {f}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {jobMetadata.extra && (
                         <div style={{ marginTop: '1.25rem' }}>
                           {jobMetadata.extra.description && (
@@ -849,78 +923,145 @@ function App() {
                         </a>
                       </div>
                     </div>
-
-                    {/* Column 2: Directory Tree */}
-                    <div className="glass-card" style={{ padding: '1.25rem', background: 'rgba(0,0,0,0.1)' }}>
-                      <h4 className="card-title" style={{ fontSize: '1rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.5rem' }}>
-                        <FolderOpenIcon size={16} />
-                        <span>Directory Tree</span>
-                      </h4>
-                      <div className="tree-container" style={{ marginTop: '1rem' }}>
-                        {jobTree ? renderTree(jobTree) : <p style={{ color: 'var(--text-dark)' }}>No tree layout generated.</p>}
-                      </div>
-                    </div>
                   </div>
 
-                  {/* Row 3: Files Table */}
-                  <div className="glass-card" style={{ marginTop: '1.5rem', padding: '1.25rem', background: 'rgba(0,0,0,0.1)' }}>
-                    <h4 className="card-title" style={{ fontSize: '1rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.5rem' }}>
-                      <FileText size={16} />
-                      <span>Files Register</span>
-                    </h4>
-
-                    {/* Controls */}
-                    <div className="files-control-bar" style={{ marginTop: '1rem' }}>
-                      <div className="search-input-wrapper">
-                        <Search className="search-icon" size={16} />
-                        <input 
-                          type="text" 
-                          placeholder="Search files by path or extension..." 
-                          value={filesSearch}
-                          onChange={(e) => setFilesSearch(e.target.value)}
-                        />
-                      </div>
-                      <div className="sort-select">
-                        <select 
-                          value={filesSort}
-                          onChange={(e) => setFilesSort(e.target.value)}
+                  {/* Explorer Section (Tree + Flat list on left, Code Viewer on right) */}
+                  <div className="explorer-section">
+                    {/* Left Column: File Navigation */}
+                    <div className="glass-card" style={{ padding: '1.25rem', background: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div className="tab-headers" style={{ marginBottom: 0 }}>
+                        <button 
+                          className={`tab-btn ${explorerTab === 'tree' ? 'active' : ''}`}
+                          onClick={() => setExplorerTab('tree')}
+                          type="button"
                         >
-                          <option value="path-asc">Path (A-Z)</option>
-                          <option value="path-desc">Path (Z-A)</option>
-                          <option value="size-desc">Size (Large - Small)</option>
-                          <option value="size-asc">Size (Small - Large)</option>
-                          <option value="language-asc">Language (A-Z)</option>
-                        </select>
+                          <FolderOpen size={16} />
+                          <span>Tree</span>
+                        </button>
+                        <button 
+                          className={`tab-btn ${explorerTab === 'list' ? 'active' : ''}`}
+                          onClick={() => setExplorerTab('list')}
+                          type="button"
+                        >
+                          <FileText size={16} />
+                          <span>Flat List</span>
+                        </button>
                       </div>
-                    </div>
 
-                    {/* Files container */}
-                    <div className="files-list-container">
-                      {processedFiles.length === 0 ? (
-                        <p style={{ color: 'var(--text-dark)', padding: '2rem', textAlign: 'center' }}>
-                          No files found matching the search criteria.
-                        </p>
-                      ) : (
-                        processedFiles.map((file, idx) => (
-                          <div key={idx} className="file-row-item">
-                            <div className="file-row-header">
-                              <span>{file.path}</span>
+                      {explorerTab === 'tree' && (
+                        <div className="tree-container">
+                          {jobTree ? renderTreeNode(jobTree) : <p style={{ color: 'var(--text-dark)' }}>No tree layout generated.</p>}
+                        </div>
+                      )}
+
+                      {explorerTab === 'list' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                          <div className="files-control-bar">
+                            <div className="search-input-wrapper">
+                              <Search className="search-icon" size={16} />
+                              <input 
+                                type="text" 
+                                placeholder="Search files..." 
+                                value={filesSearch}
+                                onChange={(e) => setFilesSearch(e.target.value)}
+                              />
                             </div>
-                            <div className="file-row-meta">
-                              <span>Size: <strong>{formatSize(file.size)}</strong></span>
-                              {file.language && (
-                                <span className="lang-pill" style={{ margin: 0, padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>
-                                  {file.language}
-                                </span>
-                              )}
-                              {file.hash && (
-                                <span className="file-hash" title={`MD5: ${file.hash}`}>
-                                  MD5: {file.hash.substring(0, 8)}...
-                                </span>
-                              )}
+                            <div className="sort-select">
+                              <select 
+                                value={filesSort}
+                                onChange={(e) => setFilesSort(e.target.value)}
+                              >
+                                <option value="path-asc">Path (A-Z)</option>
+                                <option value="path-desc">Path (Z-A)</option>
+                                <option value="size-desc">Size (Large-Small)</option>
+                                <option value="size-asc">Size (Small-Large)</option>
+                                <option value="language-asc">Language (A-Z)</option>
+                              </select>
                             </div>
                           </div>
-                        ))
+
+                          <div className="files-list-container">
+                            {processedFiles.length === 0 ? (
+                              <p style={{ color: 'var(--text-dark)', padding: '2rem', textAlign: 'center' }}>
+                                No files found.
+                              </p>
+                            ) : (
+                              processedFiles.map((file, idx) => (
+                                <div 
+                                  key={idx} 
+                                  className={`file-row-item clickable ${selectedFilePath === file.path ? 'selected' : ''}`}
+                                  onClick={() => handleFileClick(file.path)}
+                                  style={{ cursor: 'pointer' }}
+                                >
+                                  <div className="file-row-header">
+                                    <span>{file.path}</span>
+                                  </div>
+                                  <div className="file-row-meta">
+                                    <span>Size: <strong>{formatSize(file.size_bytes)}</strong></span>
+                                    {file.language && (
+                                      <span className="lang-pill" style={{ margin: 0, padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>
+                                        {file.language}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Column: Code Viewer */}
+                    <div className="glass-card" style={{ padding: '1.25rem', background: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', minHeight: '500px' }}>
+                      {selectedFilePath === null ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)', textAlign: 'center', padding: '3rem 1rem' }}>
+                          <FileCode size={48} style={{ color: 'var(--text-dark)', marginBottom: '1rem' }} />
+                          <p style={{ fontWeight: '500' }}>No File Selected</p>
+                          <p style={{ fontSize: '0.875rem', color: 'var(--text-dark)', marginTop: '0.25rem' }}>
+                            Select a file from the Tree or Flat List to view its content.
+                          </p>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: '0.75rem', minWidth: 0 }}>
+                          <div className="code-viewer-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.75rem', gap: '1rem' }}>
+                            <div style={{ minWidth: 0 }}>
+                              <h4 style={{ fontSize: '0.95rem', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+                                {selectedFilePath}
+                              </h4>
+                              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                                Size: {formatSize(selectedFileDetails?.size_bytes)} | Language: {selectedFileDetails?.language || 'Plain Text'}
+                              </p>
+                            </div>
+                            <button 
+                              className="tab-btn" 
+                              style={{ padding: '0.4rem 0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0 }}
+                              onClick={handleCopyCode}
+                              type="button"
+                            >
+                              {copied ? 'Copied!' : 'Copy Code'}
+                            </button>
+                          </div>
+
+                          <div className="code-viewer-body" style={{ flex: 1, position: 'relative', background: '#030712', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)', overflow: 'hidden', minHeight: '350px', display: 'flex' }}>
+                            {loadingFileContent ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', minHeight: '350px' }}>
+                                <Loader2 className="loader-spinner" />
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', width: '100%', overflow: 'auto', padding: '1rem', fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: '1.5' }}>
+                                <div style={{ color: 'var(--text-dark)', textAlign: 'right', userSelect: 'none', paddingRight: '1rem', borderRight: '1px solid rgba(255,255,255,0.05)', marginRight: '1rem', minWidth: '2.5rem' }}>
+                                  {selectedFileContent ? selectedFileContent.split('\n').map((_, i) => (
+                                    <div key={i}>{i + 1}</div>
+                                  )) : <div>1</div>}
+                                </div>
+                                <pre style={{ margin: 0, color: '#f3f4f6', flex: 1, whiteSpace: 'pre', overflow: 'visible' }}>
+                                  <code>{selectedFileContent || ''}</code>
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>

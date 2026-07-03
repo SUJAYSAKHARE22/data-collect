@@ -96,23 +96,76 @@ All collection jobs run as FastAPI background tasks; endpoints return
 
 Interactive API docs are available at `/docs` (Swagger UI) once running.
 
-## Installation
+## Installation & Setup
+
+### 1. Backend Setup
+
+First, navigate to the `backend` directory, create a virtual environment, install the dependencies, and set up your environment variables:
 
 ```bash
+# Navigate to the backend directory
+cd backend
+
+# Create a virtual environment
 python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
+
+# Activate virtual environment
+# On Windows (Command Prompt):
+venv\Scripts\activate.bat
+# On Windows (PowerShell):
+.\venv\Scripts\activate.ps1
+# On macOS/Linux:
+source venv/bin/activate
+
+# Install requirements
 pip install -r requirements.txt
-cp .env.example .env          # then edit as needed
+
+# Create .env file from template
+cp .env.example .env
+# Edit the .env file if you wish to override GITHUB_TOKEN or change directories
 ```
 
-## Running
+### 2. Frontend Setup
+
+In a separate terminal, navigate to the `frontend` directory and install the Node.js packages:
 
 ```bash
-uvicorn app.main:app --reload
+# Navigate to the frontend directory
+cd frontend
+
+# Install packages
+npm install
 ```
 
-The API will be available at `http://localhost:8000`, with docs at
-`http://localhost:8000/docs`.
+---
+
+## Running the Application
+
+To run the full stack, you need to start both the FastAPI backend and the Vite frontend:
+
+### 1. Start the Backend Server
+
+From the `backend` directory (ensure your virtual environment is activated):
+
+```bash
+# Run using the run script
+python run.py
+
+# Alternatively, run using uvicorn directly:
+uvicorn run:app --reload
+```
+
+The backend API will start at **`http://localhost:8000`** with the interactive documentation available at **`http://localhost:8000/docs`**.
+
+### 2. Start the Frontend Dev Server
+
+From the `frontend` directory:
+
+```bash
+npm run dev
+```
+
+The Vite dev server will start at **`http://localhost:3000`**. Open this URL in your web browser to access the dashboard.
 
 ## Running with Docker
 

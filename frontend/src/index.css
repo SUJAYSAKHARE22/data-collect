@@ -799,3 +799,71 @@ header {
     transform: translateY(-8px);
   }
 }
+
+/* Explorer Section Layout */
+.explorer-section {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .explorer-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* File Navigation Row Hover & Selected Styles */
+.file-row-item.clickable {
+  cursor: pointer;
+  border: 1px solid var(--border-glass);
+  transition: all var(--transition-fast);
+}
+
+.file-row-item.clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.file-row-item.clickable.selected {
+  background: rgba(6, 182, 212, 0.06);
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.1);
+}
+
+/* Directory Tree node selection state */
+.tree-node-content.file.clickable {
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tree-node-content.file.clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tree-node-content.file.clickable.selected {
+  background: rgba(6, 182, 212, 0.08);
+  color: var(--primary);
+  border-left: 2px solid var(--primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* Code Viewer styles */
+.code-viewer-header {
+  min-width: 0;
+}
+
+.code-viewer-body {
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.code-viewer-body pre {
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+}
+
+.code-viewer-body code {
+  font-family: inherit;
+}
+

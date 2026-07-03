@@ -45,3 +45,5 @@ htmlcov/
 
 # Python version
 .python-version
+# Output directory
+output/

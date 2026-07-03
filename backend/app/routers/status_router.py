@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from app.dependencies import get_collector_service
 from app.schemas.responses import (
+    FileContentResponse,
     FilesResponse,
     JobStatusResponse,
     MetadataResponse,
@@ -83,6 +84,53 @@ async def get_files(
     if files is None:
         raise HTTPException(status_code=404, detail="Files list not yet available for this job")
     return FilesResponse(job_id=job_id, files=files)
+
+
+@router.get("/files/{job_id}/{file_path:path}", response_model=FileContentResponse)
+async def get_file_content(
+    job_id: str,
+    file_path: str,
+    jobs: JobRepository = Depends(get_job_repository),
+    collector: CollectorService = Depends(get_collector_service),
+) -> FileContentResponse:
+    await _get_job_or_404(job_id, jobs)
+    storage = collector.storage_for(job_id)
+    if not storage.project_dir.exists():
+        raise HTTPException(status_code=404, detail="Project directory not found")
+
+    try:
+        target_path = (storage.project_dir / file_path).resolve()
+        # Verify the resolved path is strictly within the project directory to prevent traversal attacks
+        if not target_path.is_relative_to(storage.project_dir.resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not target_path.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
+
+    # Limit preview size to 1MB to prevent large memory load
+    MAX_PREVIEW_SIZE = 1024 * 1024
+    try:
+        if target_path.stat().st_size > MAX_PREVIEW_SIZE:
+            return FileContentResponse(
+                job_id=job_id,
+                path=file_path,
+                content=f"[File is too large to preview ({target_path.stat().st_size} bytes). Please download the project ZIP archive to view it.]"
+            )
+        content = target_path.read_text(encoding="utf-8", errors="replace")
+        return FileContentResponse(job_id=job_id, path=file_path, content=content)
+    except UnicodeDecodeError:
+        return FileContentResponse(
+            job_id=job_id,
+            path=file_path,
+            content="[Binary file or invalid UTF-8: preview not supported]"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
 
 
 @router.get("/download/{job_id}")
