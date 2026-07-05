@@ -170,9 +170,80 @@ class KimiProvider:
         text = text.strip()
         try:
             return json.loads(text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as orig_exc:
             start = text.find("{")
             end = text.rfind("}")
             if start != -1 and end != -1 and end > start:
-                return json.loads(text[start : end + 1])
-            raise
+                try:
+                    return json.loads(text[start : end + 1])
+                except json.JSONDecodeError:
+                    pass
+
+            if start != -1:
+                try:
+                    return KimiProvider._repair_and_parse_truncated_json(text[start:])
+                except json.JSONDecodeError:
+                    pass
+
+            raise orig_exc
+
+    @staticmethod
+    def _repair_and_parse_truncated_json(text: str, max_lookback: int = 4000) -> dict:
+        """
+        Reconstruct state-based representation of truncated JSON string,
+        truncates back to a safe point, closes open brackets/braces, and returns parsed JSON dict.
+        """
+        text = text.strip()
+        if not text:
+            return {}
+
+        states = [None] * (len(text) + 1)
+        states[0] = ((), False, False)
+        stack = []
+        in_string = False
+        escape = False
+        for idx, char in enumerate(text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == '\\':
+                    escape = True
+                elif char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char in ('{', '['):
+                    stack.append(char)
+                elif char in ('}', ']'):
+                    if stack:
+                        top = stack[-1]
+                        if (char == '}' and top == '{') or (char == ']' and top == '['):
+                            stack.pop()
+            states[idx + 1] = (tuple(stack), in_string, escape)
+
+        start_idx = len(text)
+        end_idx = max(0, start_idx - max_lookback)
+
+        for i in range(start_idx, end_idx - 1, -1):
+            stack_tuple, in_string, escape = states[i]
+            sub = text[:i]
+
+            suffix = ""
+            if in_string:
+                if escape:
+                    sub = sub[:-1]
+                suffix += '"'
+
+            for sym in reversed(stack_tuple):
+                if sym == '{':
+                    suffix += '}'
+                elif sym == '[':
+                    suffix += ']'
+
+            try:
+                return json.loads(sub + suffix)
+            except json.JSONDecodeError:
+                continue
+
+        raise json.JSONDecodeError("Failed to repair truncated JSON", text, 0)
