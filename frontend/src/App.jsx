@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import './App.css';
 import { 
   Globe, 
   FileArchive, 
@@ -16,7 +17,13 @@ import {
   History,
   Info,
   Calendar,
-  FileText
+  FileText,
+  Sparkles,
+  FileDown,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+  BarChart3
 } from 'lucide-react';
 
 const Github = ({ size = 20, ...props }) => (
@@ -84,6 +91,15 @@ function App() {
   const [loadingFileContent, setLoadingFileContent] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // AI Analysis Agent states
+  const [analysisId, setAnalysisId] = useState(null);
+  const [analysisStatus, setAnalysisStatus] = useState(null); // { status, error, confidence }
+  const [analysisPolling, setAnalysisPolling] = useState(false);
+  const [analysisError, setAnalysisError] = useState(null);
+  const [analysisReport, setAnalysisReport] = useState(null); // parsed report_data JSON
+  const [analysisStarting, setAnalysisStarting] = useState(false);
+  const [expandedFindingGroups, setExpandedFindingGroups] = useState(new Set());
+
   // Load history from localStorage on mount
   useEffect(() => {
     try {
@@ -142,6 +158,126 @@ function App() {
 
     return () => clearInterval(intervalId);
   }, [jobId]);
+
+  // Poll AI analysis status when analysisId changes
+  useEffect(() => {
+    if (!analysisId) return;
+
+    let intervalId;
+    const checkAnalysisStatus = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/analyze/status/${analysisId}`);
+        if (!response.ok) {
+          throw new Error(`Error fetching analysis status: ${response.statusText}`);
+        }
+        const data = await response.json();
+        setAnalysisStatus(data);
+
+        if (data.status === 'completed') {
+          setAnalysisPolling(false);
+          clearInterval(intervalId);
+          fetchAnalysisReport(analysisId);
+        } else if (data.status === 'failed') {
+          setAnalysisPolling(false);
+          clearInterval(intervalId);
+          setAnalysisError(data.error || 'AI analysis failed on the server.');
+        }
+      } catch (err) {
+        console.error(err);
+        setAnalysisError(`Failed to retrieve analysis status: ${err.message}`);
+        setAnalysisPolling(false);
+        clearInterval(intervalId);
+      }
+    };
+
+    setAnalysisPolling(true);
+    setAnalysisError(null);
+    checkAnalysisStatus();
+    intervalId = setInterval(checkAnalysisStatus, 2500);
+
+    return () => clearInterval(intervalId);
+  }, [analysisId]);
+
+  // Fetch the structured report data once analysis completes
+  const fetchAnalysisReport = async (id) => {
+    try {
+      const response = await fetch(`${API_BASE}/analyze/${id}/report?format=json`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch analysis report');
+      }
+      const data = await response.json();
+      setAnalysisReport(data);
+      setExpandedFindingGroups(new Set((data.developer?.groups || []).slice(0, 1).map(g => g.id)));
+    } catch (err) {
+      console.error(err);
+      setAnalysisError(`Failed to fetch analysis report: ${err.message}`);
+    }
+  };
+
+  // Kick off a new AI analysis run for the current job
+  const handleStartAnalysis = async () => {
+    if (!jobId) return;
+    setAnalysisStarting(true);
+    setAnalysisError(null);
+    setAnalysisReport(null);
+    setAnalysisStatus(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/analyze/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      if (!response.ok) {
+        const errorDetail = await response.json().catch(() => ({}));
+        throw new Error(errorDetail.detail || 'Failed to start AI analysis');
+      }
+
+      const data = await response.json();
+      setAnalysisId(data.analysis_id);
+    } catch (err) {
+      setAnalysisError(err.message);
+    } finally {
+      setAnalysisStarting(false);
+    }
+  };
+
+  const toggleFindingGroup = (groupId) => {
+    const next = new Set(expandedFindingGroups);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    setExpandedFindingGroups(next);
+  };
+
+  const downloadAnalysisAsset = async (format) => {
+    if (!analysisId) return;
+    const url = format === 'pdf'
+      ? `${API_BASE}/analyze/${analysisId}/report.pdf`
+      : `${API_BASE}/analyze/${analysisId}/report?format=${format}`;
+
+    if (format === 'pdf') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const ext = format === 'markdown' ? 'md' : format;
+      const objectUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = `${(analysisReport?.projectName || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-report.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      console.error(err);
+      setAnalysisError(`Failed to download ${format} report: ${err.message}`);
+    }
+  };
 
   // Fetch metadata, tree, files once completed
   const fetchResults = async (id) => {
@@ -321,6 +457,12 @@ function App() {
     setSelectedFileContent(null);
     setLoadingFileContent(false);
     setCopied(false);
+    setAnalysisId(null);
+    setAnalysisStatus(null);
+    setAnalysisError(null);
+    setAnalysisReport(null);
+    setAnalysisPolling(false);
+    setExpandedFindingGroups(new Set());
   };
 
   const handleFileClick = async (path) => {
@@ -924,6 +1066,170 @@ function App() {
                       </div>
                     </div>
                   </div>
+
+                  {/* AI Analysis Agent Section */}
+                  {jobStatus?.status === 'completed' && (
+                    <div className="ai-analysis-card">
+                      <div className="ai-analysis-header">
+                        <div className="ai-analysis-title">
+                          <Sparkles size={18} />
+                          <span>AI Analysis Agent</span>
+                        </div>
+                        {!analysisId && (
+                          <button
+                            className="ai-run-btn"
+                            onClick={handleStartAnalysis}
+                            disabled={analysisStarting}
+                          >
+                            {analysisStarting ? <Loader2 size={16} className="loader-spinner" style={{ width: 16, height: 16, borderWidth: '2px' }} /> : <Sparkles size={16} />}
+                            <span>{analysisStarting ? 'Starting...' : 'Run AI Analysis'}</span>
+                          </button>
+                        )}
+                        {analysisId && analysisStatus?.status === 'completed' && (
+                          <button
+                            className="ai-run-btn"
+                            onClick={() => { setAnalysisId(null); setAnalysisReport(null); setAnalysisStatus(null); }}
+                          >
+                            <Sparkles size={16} />
+                            <span>Re-run Analysis</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {!analysisId && !analysisError && (
+                        <p className="ai-analysis-intro">
+                          Runs an AI code-analysis agent (Kimi K2) over the collected project to produce a
+                          confidence-scored report covering architecture, code quality, security, dependencies,
+                          and a phased action plan — downloadable as Markdown, HTML, JSON, or PDF.
+                        </p>
+                      )}
+
+                      {analysisError && (
+                        <div className="ai-error-box">
+                          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                          <span>{analysisError}</span>
+                        </div>
+                      )}
+
+                      {analysisPolling && !analysisReport && (
+                        <div className="ai-analysis-loading">
+                          <Loader2 size={20} className="loader-spinner" style={{ width: 20, height: 20, borderWidth: '2px' }} />
+                          <span>
+                            {analysisStatus?.status === 'running' || !analysisStatus
+                              ? 'Analyzing project with Kimi K2 — this can take up to a minute...'
+                              : `Status: ${analysisStatus?.status}...`}
+                          </span>
+                        </div>
+                      )}
+
+                      {analysisReport && (
+                        <>
+                          <div className={`confidence-badge ${analysisReport.overallConfidence.score >= 0.8 ? '' : analysisReport.overallConfidence.score >= 0.5 ? 'medium' : 'low'}`}>
+                            <ShieldCheck size={16} />
+                            <span className="cb-score">{Math.round(analysisReport.overallConfidence.score * 100)}% confidence</span>
+                            <span className="cb-rationale">{analysisReport.overallConfidence.rationale}</span>
+                          </div>
+
+                          <p className="ai-analysis-intro" style={{ color: 'var(--text-main)' }}>
+                            {analysisReport.executive.overview}
+                          </p>
+
+                          <div className="ai-stats-row">
+                            <div className="ai-stat">
+                              <span className="ai-stat-value">{analysisReport.executive.overallRisk}</span>
+                              <span className="ai-stat-label">Overall Risk</span>
+                            </div>
+                            <div className="ai-stat">
+                              <span className="ai-stat-value">{analysisReport.executive.totalFindings}</span>
+                              <span className="ai-stat-label">Total Findings</span>
+                            </div>
+                            <div className="ai-stat">
+                              <span className="ai-stat-value">{analysisReport.executive.estimatedTimeline}</span>
+                              <span className="ai-stat-label">Est. Timeline</span>
+                            </div>
+                            <div className="ai-stat">
+                              <span className="ai-stat-value">${analysisReport.business.estimatedCost.toLocaleString()}</span>
+                              <span className="ai-stat-label">Est. Cost</span>
+                            </div>
+                          </div>
+
+                          <div style={{ marginBottom: '0.75rem' }}>
+                            {Object.entries(analysisReport.executive.bySeverity).filter(([, c]) => c > 0).map(([sev, count]) => (
+                              <span key={sev} className={`severity-pill ${sev}`} style={{ marginRight: '0.4rem' }}>
+                                {sev}: {count}
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="ai-download-row">
+                            <button className="ai-download-btn pdf" onClick={() => downloadAnalysisAsset('pdf')}>
+                              <FileDown size={15} />
+                              <span>Download PDF Report</span>
+                            </button>
+                            <button className="ai-download-btn" onClick={() => downloadAnalysisAsset('markdown')}>
+                              <FileText size={15} />
+                              <span>Markdown</span>
+                            </button>
+                            <button className="ai-download-btn" onClick={() => downloadAnalysisAsset('html')}>
+                              <FileCode size={15} />
+                              <span>HTML</span>
+                            </button>
+                            <button className="ai-download-btn" onClick={() => downloadAnalysisAsset('json')}>
+                              <Database size={15} />
+                              <span>JSON</span>
+                            </button>
+                          </div>
+
+                          <h4 style={{ fontSize: '0.9rem', margin: '1rem 0 0.5rem', color: 'var(--text-main)' }}>
+                            <BarChart3 size={15} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} />
+                            Findings by Category
+                          </h4>
+                          {analysisReport.developer.groups.map(group => (
+                            <div key={group.id} className="finding-group-card">
+                              <div className="finding-group-header" onClick={() => toggleFindingGroup(group.id)}>
+                                <span className="finding-group-name">
+                                  <span className={`severity-pill ${group.maxSeverity}`}>{group.maxSeverity}</span>
+                                  {group.name}
+                                  <span className="finding-group-count">({group.count} findings)</span>
+                                </span>
+                                {expandedFindingGroups.has(group.id) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                              </div>
+                              {expandedFindingGroups.has(group.id) && (
+                                <div className="finding-group-body">
+                                  {group.findings.map(f => (
+                                    <div key={f.id} className="finding-row">
+                                      <div className="finding-row-title">
+                                        <span className={`severity-pill ${f.severity}`}>{f.severity}</span>
+                                        <span>{f.title}</span>
+                                        {f.file && <span className="finding-row-file">{f.file}</span>}
+                                      </div>
+                                      <div className="finding-row-desc">{f.description}</div>
+                                      <div className="finding-row-rec">→ {f.recommendation}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          <h4 style={{ fontSize: '0.9rem', margin: '1.25rem 0 0.5rem', color: 'var(--text-main)' }}>
+                            Implementation Roadmap
+                          </h4>
+                          {analysisReport.roadmap.phases.map((phase, idx) => (
+                            <div key={idx} className="ai-roadmap-phase">
+                              <h5>{phase.name} · {phase.totalHours}h</h5>
+                              <p style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginBottom: '0.4rem' }}>{phase.description}</p>
+                              {phase.items.map((item, i) => (
+                                <div key={i} className="ai-roadmap-item">
+                                  • <strong style={{ color: 'var(--text-main)' }}>{item.title}</strong> ({item.effort}, {item.effortHours}h): {item.action}
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {/* Explorer Section (Tree + Flat list on left, Code Viewer on right) */}
                   <div className="explorer-section">

@@ -90,11 +90,52 @@ output/{job_id}/
 | GET    | `/tree/{job_id}`      | Fetch `tree.json`                              |
 | GET    | `/files/{job_id}`     | Fetch `files.json`                             |
 | GET    | `/download/{job_id}`  | Download the collected project as a ZIP        |
+| POST   | `/analyze/{job_id}`   | Start an AI Analysis Agent run on a completed collection job |
+| GET    | `/analyze/status/{analysis_id}` | Poll AI analysis job status         |
+| GET    | `/analyze/{analysis_id}/report?format=` | Fetch the report (`markdown`, `html`, or `json`) |
+| GET    | `/analyze/{analysis_id}/report.pdf` | Download the report as a PDF        |
 
 All collection jobs run as FastAPI background tasks; endpoints return
 `202 Accepted` immediately with a `job_id` to poll.
 
 Interactive API docs are available at `/docs` (Swagger UI) once running.
+
+## AI Analysis Agent
+
+Once a collection job status is `completed`, you can run an AI-powered
+analysis agent over the collected project (works for GitHub, ZIP, website,
+or local collections). It is modeled on ReplexAgent's audit/report pipeline,
+adapted for source code:
+
+1. **Context building** — a token-budgeted slice of the collected project
+   (entry files, dependency manifests, and the largest source files) is
+   selected, honoring `ANALYSIS_MAX_FILES` / `ANALYSIS_MAX_FILE_CHARS` /
+   `ANALYSIS_MAX_TOTAL_CHARS`.
+2. **LLM analysis** — the context is sent to the **Kimi K2** model (via the
+   NVIDIA NIM OpenAI-compatible API) which returns a structured JSON audit
+   covering architecture, code quality, security, dependencies, best
+   practices, documentation, and performance.
+3. **Confidence validation** — every finding is structurally validated, and
+   any finding referencing a file that isn't part of the actually-collected
+   project is dropped and logged as an excluded data point. This is an
+   anti-hallucination safeguard beyond what the original ReplexAgent
+   validator does (it only checks shape, not grounding against real data).
+4. **Report generation** — a confidence-scored report is built with
+   executive, developer, business, and roadmap sections, and rendered to
+   Markdown, HTML, and JSON.
+5. **PDF export** — the HTML report is converted server-side to a
+   downloadable PDF (via `xhtml2pdf`), matching ReplexAgent's
+   HTML → PDF report delivery approach, directly from the API — no
+   headless browser required.
+
+Configure it by setting `KIMI_API_KEY` (and optionally `KIMI_BASE_URL` /
+`KIMI_MODEL`) in `backend/.env`. Get a key at https://build.nvidia.com/.
+
+In the UI, once a job finishes, an **"AI Analysis Agent"** card appears
+with a **Run AI Analysis** button. When complete, it shows the confidence
+score, executive summary, categorized findings, and an implementation
+roadmap, with buttons to download the report as Markdown, HTML, JSON, or
+PDF.
 
 ## Installation & Setup
 

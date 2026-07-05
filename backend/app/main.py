@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config.settings import get_settings
-from app.routers import github_router, local_router, status_router, website_router, zip_router
+from app.routers import analysis_router, github_router, local_router, status_router, website_router, zip_router
 from app.utils.logger import configure_logging, get_logger
 
 settings = get_settings()
@@ -63,6 +63,7 @@ app.include_router(website_router.router)
 app.include_router(zip_router.router)
 app.include_router(local_router.router)
 app.include_router(status_router.router)
+app.include_router(analysis_router.router)
 
 
 @app.exception_handler(StarletteHTTPException)
